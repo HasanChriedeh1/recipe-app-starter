@@ -1,4 +1,5 @@
 import type { Recipe } from "../types/recipe";
+import { getPublicImageUrl } from "../services/storageService";
 
 type RecipeCardProps = {
   recipe: Recipe;
@@ -21,8 +22,20 @@ export default function RecipeCard({
   onDelete,
   onToggleFavorite
 }: RecipeCardProps) {
+  const imageUrl = getPublicImageUrl(recipe.image_path);
+
   return (
     <div className="recipe-card">
+      <div className="recipe-card-image">
+        <img 
+          src={imageUrl} 
+          alt={recipe.title}
+          onError={(e) => {
+            const target = e.target as HTMLImageElement;
+            target.src = "https://via.placeholder.com/400x300?text=No+Image";
+          }}
+        />
+      </div>
       <div className="recipe-card-badge">{categoryName}</div>
       <h3 className="recipe-card-title">{recipe.title}</h3>
       <div className="recipe-card-meta">

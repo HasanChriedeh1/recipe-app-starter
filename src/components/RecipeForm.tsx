@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { Category } from "../types/category";
 import type { NewRecipe, Recipe, RecipeFormData } from "../types/recipe";
+import { uploadImage, replaceImage, getPublicImageUrl } from "../services/storageService";
 
 type RecipeFormProps = {
   categories: Category[];
@@ -19,6 +20,7 @@ const initialForm: RecipeFormData = {
   description: "",
   prep_time: 0,
   category_id: "",
+  image_file: undefined,
 };
 
 export default function RecipeForm({
@@ -34,6 +36,9 @@ export default function RecipeForm({
 }: RecipeFormProps) {
   const [form, setForm] = useState<RecipeFormData>(initialForm);
   const [localError, setLocalError] = useState("");
+  const [previewUrl, setPreviewUrl] = useState<string>("");
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (editingRecipe) {
@@ -42,15 +47,44 @@ export default function RecipeForm({
         description: editingRecipe.description,
         prep_time: editingRecipe.prep_time,
         category_id: editingRecipe.category_id.toString(),
+        image_file: undefined,
       });
+      // Show current image if editing
+      if (editingRecipe.image_path) {
+        setPreviewUrl(getPublicImageUrl(editingRecipe.image_path));
+      } else {
+        setPreviewUrl("");
+      }
       setLocalError("");
     } else {
       setForm(initialForm);
+      setPreviewUrl("");
     }
   }, [editingRecipe]);
 
   function updateField<K extends keyof RecipeFormData>(key: K, value: RecipeFormData[K]) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file) {
+      updateField("image_file", file);
+      // Create preview
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setPreviewUrl(event.target?.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function clearImage() {
+    setPreviewUrl("");
+    updateField("image_file", undefined);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
   }
 
   function validate() {
@@ -70,15 +104,39 @@ export default function RecipeForm({
     e.preventDefault();
     if (!validate()) return;
 
+    setIsUploading(true);
+    let imagePath: string | undefined;
+
     if (editingRecipe) {
+      // Handle image replacement if a new file is selected
+      if (form.image_file) {
+        imagePath = await replaceImage(
+          form.image_file,
+          editingRecipe.image_path,
+          editingRecipe.id,
+          userId
+        );
+      } else {
+        // Keep existing image
+        imagePath = editingRecipe.image_path;
+      }
+
       const ok = await onEditRecipe(editingRecipe.id, {
         title: form.title.trim(),
         description: form.description.trim(),
         prep_time: Number(form.prep_time),
         category_id: Number(form.category_id),
+        image_path: imagePath,
       });
       if (ok) onCancelEdit();
     } else {
+      // Upload image if provided
+      if (form.image_file) {
+        // We need to create the recipe first to get the ID
+        // So we'll pass the file through and let MainContent handle it
+        imagePath = undefined; // Will be handled in MainContent
+      }
+
       const recipe: NewRecipe = {
         title: form.title.trim(),
         description: form.description.trim(),
@@ -86,10 +144,17 @@ export default function RecipeForm({
         category_id: Number(form.category_id),
         user_id: userId,
         owner_email: userEmail,
+        image_path: imagePath,
       };
+      
+      // Store the file temporarily for MainContent to handle
+      (recipe as any).tempImageFile = form.image_file;
+      
       const ok = await onAddRecipe(recipe);
       if (ok) setForm(initialForm);
     }
+
+    setIsUploading(false);
   }
 
   return (
@@ -143,12 +208,55 @@ export default function RecipeForm({
           </div>
         </div>
 
+        <div className="form-group">
+          <label>Recipe Image (Optional)</label>
+          <div style={{ marginTop: "0.5rem" }}>
+            {previewUrl && (
+              <div style={{ marginBottom: "1rem" }}>
+                <img
+                  src={previewUrl}
+                  alt="Preview"
+                  style={{
+                    maxWidth: "300px",
+                    maxHeight: "300px",
+                    borderRadius: "8px",
+                    marginBottom: "0.5rem",
+                    display: "block",
+                  }}
+                />
+                <button
+                  type="button"
+                  className="btn-outline"
+                  onClick={clearImage}
+                  style={{ marginTop: "0.5rem" }}
+                >
+                  Remove Image
+                </button>
+              </div>
+            )}
+            {!previewUrl && (
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                style={{ display: "block", marginBottom: "0.5rem" }}
+              />
+            )}
+            <small style={{ color: "var(--text-muted)", display: "block" }}>
+              {previewUrl ? "Click 'Remove Image' to change it" : "Supported formats: JPG, PNG, GIF, WebP"}
+            </small>
+          </div>
+        </div>
+
         {localError && <p className="error-msg">{localError}</p>}
         {error && <p className="error-msg">{error}</p>}
         {successMessage && <p className="success-msg">{successMessage}</p>}
 
         <div style={{ display: "flex", gap: "10px", marginTop: "1rem" }}>
-          <button type="submit">{editingRecipe ? "Save Changes" : "Post Recipe"}</button>
+          <button type="submit" disabled={isUploading}>
+            {isUploading ? "Uploading..." : editingRecipe ? "Save Changes" : "Post Recipe"}
+          </button>
           {editingRecipe && (
             <button type="button" className="btn-outline" onClick={onCancelEdit}>Cancel Edit</button>
           )}

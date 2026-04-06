@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { NewRecipe, Recipe } from "../types/recipe";
 import { createRecipe, getAllRecipes, updateRecipe, deleteRecipe } from "../services/recipeService";
+import { uploadImage } from "../services/storageService";
 
 // Custom hook for loading and managing all recipes
 export function useRecipes() {
@@ -35,11 +36,37 @@ export function useRecipes() {
   // Adds a new recipe
   async function addRecipe(recipe: NewRecipe) {
     clearMessages();
-    const { error } = await createRecipe(recipe);
+    
+    // Extract temporary image file if present
+    const imageFile = (recipe as any).tempImageFile as File | undefined;
+    
+    // Create a clean recipe object without the temporary property
+    const cleanRecipe: NewRecipe = {
+      title: recipe.title,
+      description: recipe.description,
+      prep_time: recipe.prep_time,
+      category_id: recipe.category_id,
+      user_id: recipe.user_id,
+      owner_email: recipe.owner_email,
+      image_path: recipe.image_path,
+    };
+    
+    const { data, error } = await createRecipe(cleanRecipe);
 
     if (error) {
       setError(error.message);
       return false;
+    }
+
+    // If a recipe was created and there's an image file, upload it
+    if (data && data.length > 0 && imageFile) {
+      const newRecipeId = data[0].id;
+      const imagePath = await uploadImage(imageFile, newRecipeId, recipe.user_id);
+      
+      // Update the recipe with the image path
+      if (imagePath) {
+        await updateRecipe(newRecipeId, { image_path: imagePath });
+      }
     }
 
     setSuccessMessage("Recipe added successfully.");

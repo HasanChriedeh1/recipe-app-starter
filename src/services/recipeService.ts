@@ -1,5 +1,6 @@
 import { supabase } from "../lib/supabaseClient";
 import type { NewRecipe, Recipe } from "../types/recipe";
+import { deleteImage } from "./storageService";
 
 export async function createRecipe(recipe: NewRecipe) {
   return await supabase.from("recipes").insert([recipe]);
@@ -21,6 +22,24 @@ export async function updateRecipe(recipeId: number, updatedRecipe: Partial<NewR
 }
 
 export async function deleteRecipe(recipeId: number) {
+  // First fetch the recipe to get the image_path
+  const { data: recipe, error: fetchError } = await supabase
+    .from("recipes")
+    .select("image_path")
+    .eq("id", recipeId)
+    .single();
+
+  if (fetchError) {
+    console.error("Error fetching recipe:", fetchError);
+    return { error: fetchError };
+  }
+
+  // Delete the associated image from storage
+  if (recipe?.image_path) {
+    await deleteImage(recipe.image_path);
+  }
+
+  // Delete the recipe from database
   return await supabase
     .from("recipes")
     .delete()
